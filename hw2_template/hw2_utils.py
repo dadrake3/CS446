@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch.utils.data
 from sklearn.datasets import load_digits
+from sklearn.decomposition import PCA
 
 
 def contour_torch(xmin, xmax, ymin, ymax, M, ngrid = 33):
@@ -29,7 +30,7 @@ def contour_torch(xmin, xmax, ymin, ymax, M, ngrid = 33):
         plt.show()
 
 
-def torch_digits():
+def torch_digits(mode=False):
     """
     Get the training and test datasets for your convolutional neural network
     @return train, val: two torch.utils.data.Datasets
@@ -43,7 +44,10 @@ def torch_digits():
     labels = labels[180:]
     train = torch.utils.data.TensorDataset(digits, labels)
     val = torch.utils.data.TensorDataset(val_X, val_Y)
-    return train, val
+    if not mode:
+        return train, val
+    else:
+        return digits, labels, val_X, val_Y
 
 
 def XOR_data():
@@ -83,6 +87,7 @@ def loss_batch(model, loss_func, xb, yb, opt=None):
     @param opt: a torch.optimizer.Optimizer.  If not None, use the Optimizer to improve the model. Otherwise, just compute the loss.
     @return a numpy array of the loss of the minibatch, and the length of the minibatch
     """
+ 
     loss = loss_func(model(xb), yb)
 
     if opt is not None:
@@ -91,3 +96,15 @@ def loss_batch(model, loss_func, xb, yb, opt=None):
         opt.zero_grad()
 
     return loss.item(), len(xb) 
+
+
+
+
+
+
+
+
+
+
+
+

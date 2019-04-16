@@ -1,0 +1,228 @@
+    #!/bin/python
+#Version 2.1
+
+import numpy as np
+from numpy import linalg as la
+import torch
+import hw5_utils as utils
+from scipy.stats import norm, mode
+from scipy.stats import multivariate_normal as gauss
+from collections import defaultdict
+
+
+################################# Problem 2 #################################
+def k_means(X, k):
+    """
+    Implements Lloyd's algorithm.
+
+    arguments:
+    X -- n by d data matrix
+    k -- integer, number of centers
+
+    return:
+    A matrix C of shape k by d with centers as its rows.
+    """
+    #Hint: You can use np.random.randn to initialize the centers randomly.
+    centers = X.copy()
+    np.random.shuffle(centers)
+    centers = centers[:k]
+    while 1:
+        idx_closest = np.argmin(la.norm(centers - X[:, None], axis=2), axis=1)
+        new_centers = np.array([X[idx_closest==idx].mean(axis=0) for idx in range(k)])
+
+        if la.norm(new_centers - centers) < 1e-16:
+            break
+        centers = new_centers
+
+    return centers
+
+
+def get_purity_score(X, Y, C):
+    """
+    Computes the purity score for each cluster.
+
+    arguments:
+    X -- n by d data matrix
+    Y -- n by 1 label vector
+    C -- k by d center matrix
+
+    return:
+    Fraction of points with label matching their cluster's majority label.
+    """
+    idx_closest = np.argmin(la.norm(C - X[:, None], axis=2), axis=1)
+
+    cluster_labels = np.array([mode(Y[np.argwhere(idx_closest==i)])[0][0] for i, _ in enumerate(C) ])
+
+    num_correct = np.array([int(cluster_labels[idx_closest[i]] == Y[i]) for i in range(X.shape[0])]).sum()
+
+    return num_correct / X.shape[0]
+
+def feature_extract_k_means(C, X, k, l=1):
+    
+    A = np.zeros((X.shape[0], k)).astype(int)
+    # idx_closest = np.argmin(la.norm(C - X[:, None], axis=2), axis=1)
+    idx_closest = np.argsort(la.norm(C - X[:, None], axis=2), axis=1)
+    # print(idx_closest)
+
+    for i, idx_list in enumerate(idx_closest):
+        for j, idx in enumerate(idx_list):
+            if j >= l:
+                break
+            A[i, idx] = 1
+
+
+    assert l <= k
+
+    return A
+
+
+def classify_using_k_means(X, Y, k, l=1):
+    """
+    Classifies the datapoints learning features by k-means and classifying by logistic regression.
+
+    arguments:
+    X -- n by d data matrix
+    Y -- n by 1 label vector
+    k -- integer; number of components
+    l -- integer; number of centers to take into account
+
+    return:
+    lr -- a logistic classifier
+    C -- k by d matrix of centers
+
+    assertions:
+    l <= k
+    """
+    # C = k_means(X, k)
+    # A = np.zeros((X.shape[0], k))
+    # # idx_closest = np.argmin(la.norm(C - X[:, None], axis=2), axis=1)
+    # idx_closest = np.argsort(la.norm(C - X[:, None], axis=2), axis=1)
+    # # print(idx_closest)
+
+    # for i, idx_list in enumerate(idx_closest):
+    #     for j, idx in enumerate(idx_list):
+    #         if j > l:
+    #             break
+    #         A[i, idx] = 1
+
+
+    # assert l <= k
+    C = k_means(X, k)
+    A = feature_extract_k_means(C, X, k, l=1)
+    
+    return utils.logistic_regression(A, Y), C
+
+
+################################# Problem 3 #################################
+def gmm(X, k, epsilon=0.0001):
+    """
+    Computes the maximum likelihood Gaussian mixture model using expectation maximization algorithm.
+
+    argument:
+    X -- n by d data matrix
+    k -- integer; number of Gaussian components
+    epsilon -- improvement lower bound
+
+    return:
+    mu -- k by d matrix with centers as rows
+    variances -- k by d matrix of variances
+    weights -- k by 1 vector of probabilities over the Gaussian components
+    """
+
+    n = X.shape[0]
+    d = X.shape[1]
+    mu = k_means(X, k) #np.zeros((k, X.shape[1]))
+    sigma = np.ones((k, d))
+    pi = np.ones((k, 1)) / k
+
+
+    while 1:
+
+        r = np.zeros((n, k))
+
+        # E step
+        for i in range(n):
+            for c in range(k):
+                r[i,c] = pi[c] * gauss.pdf(X[i], mean=mu[c], cov=sigma[c]) / np.sum([pi[j] * gauss.pdf(X[i], mean=mu[j], cov=sigma[j]) for j in range(k)])
+        # M step
+        
+        new_mu = np.zeros((k, d))
+        new_sigma = np.ones((k, d))
+        new_pi = np.ones((k, 1))
+
+        for c in range(k):
+            new_pi[c] = np.sum(r[i,c] for i in range(n)) / n
+            new_mu[c] = np.sum(r[i,c] * X[i] for i in range(n)) / (n * new_pi[c])
+            new_sigma[c] = np.sum(r[i,c] * (X[i] - new_mu[c]) ** 2 for i in range(n)) / (n * new_pi[c])
+            # print(sigma[c])
+            new_sigma[c] = np.clip(new_sigma[c], epsilon, float('inf'))
+            # print(new_sigma[c])
+            
+
+        if la.norm(new_pi - pi) < epsilon:
+            break
+
+        if la.norm(new_sigma - sigma) < epsilon:
+            break
+
+        if la.norm(new_mu - mu) < epsilon:
+            break
+
+        pi = new_pi
+        sigma = new_sigma
+        mu = new_mu
+
+    return mu, sigma, pi
+
+def gmm_predict(x, mu, sigma, pi):
+    """
+    Computes the posterior probability of x having been generated by each of the k Gaussian components.
+
+    arguments:
+    x -- a single data point
+    mu -- k by d matrix of centers
+    variances -- k by d matrix of variances
+    weights -- k by 1 vector of probabilities over the Gaussian components
+
+    return:
+    a k-vector that is the probability distribution of x having been generated by each of the Gaussian components.
+    """
+    k = mu.shape[0]
+    p = np.zeros(k)
+    for c in range(k):
+        p[c] = pi[c] * gauss.pdf(x, mean=mu[c], cov=sigma[c]) / np.sum([pi[j] * gauss.pdf(x, mean=mu[j], cov=sigma[j]) for j in range(k)])
+
+
+
+    return p
+
+def feature_extract_gmm(mu, sigma, pi, X, k):
+
+    A = np.zeros((X.shape[0], k)).astype(int)
+    for i, x in enumerate(X):
+        p = gmm_predict(x, mu, sigma, pi)
+        j = np.argmax(p)
+        A[i,j] = 1
+
+    return A
+
+def classify_using_gmm(X, Y, k):
+    """
+    Classifies the datapoints learning features by GMM and classifying by logistic regression.
+
+    arguments:
+    X -- n by d data matrix
+    Y -- n by 1 label vector
+    k -- integer; number of components
+
+    return:
+    lr -- a logistic classifier
+    mu -- k by d matrix of centers
+    variances -- k by d matrix of variances
+    weights -- k-vector of component weights
+    """
+    mu, sigma, pi = gmm(X, k)
+    A = feature_extract_gmm(mu, sigma, pi, X, k)
+
+    return utils.logistic_regression(A, Y), mu, sigma, pi
+

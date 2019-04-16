@@ -4,6 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+import hw2_utils as utils
+
+
 
 class XORNet(nn.Module):
     D_in=2
@@ -151,11 +154,14 @@ class DigitsConvNet(nn.Module):
         @return: an (N, 4) torch tensor
         """
 
-
+        # xb = xb.view()
+        # print(xb.shape)
+        # xb = xb.view(xb.shape[0], -1, xb.shape[1], xb.shape[2])
+        xb = xb.view(-1, 1, xb.shape[1], xb.shape[2])
         x = F.relu(self.conv1(xb))
         x = self.pool(x)
         x = F.relu(self.conv2(x))
-        return x
+        return x.view(-1, 4)
 
     def forward(self, xb):
         """ A forward pass of your neural network
@@ -169,20 +175,59 @@ class DigitsConvNet(nn.Module):
         # x = self.pool(x)
         # x = F.relu(self.conv2(x))
         x = self.intermediate(xb)
-        # x = x.view(-1, 4)
-        x = self.fc1(x)
 
+        x = self.fc1(x)
+        # return x
 
         return x.view(-1, 10)
         
-def loss_batch(net, loss_func, X, Y):
-    Y_pred = net(X)
-    loss = loss_fn(Y_pred, Y)
-    return loss
+
+# def fit_and_validate(net, optimizer, train, val, n_epochs, loss_func, batch_size=1):
+#     """
+#     @param net: the neural network
+#     @param optimizer: a optim.Optimizer used for some variant of stochastic gradient descent
+#     @param train: a torch.utils.data.Dataset
+#     @param val: a torch.utils.data.Dataset
+#     @param n_epochs: the number of epochs over which to do gradient descent
+#     @param batch_size: the number of samples to use in each batch of gradient descent
+#     @return train_epoch_loss, validation_epoch_loss: two arrays of length n_epochs+1, containing the mean loss at the beginning of training and after each epoch
+#     """
+#     try:
+#         print(f'batch {batch_size}')
+
+#         net.eval() #put the net in evaluation mode
+#         train_dl = torch.utils.data.DataLoader(train, batch_size)
+#         val_dl = torch.utils.data.DataLoader(val, batch_size)
+#         with torch.no_grad():
+#             # compute the mean loss on the training set at the beginning of iteration
+#             losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y) for X, Y in train_dl])
+#             train_epoch_loss = [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
+#             # TODO compute the validation loss and store it in a list
+#             losses, nums = zip(*[loss_batch(net, loss_func, X, Y) for X, Y in val_dl])
+#             val_epoch_loss = [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
 
 
+#         for _ in range(n_epochs):
+#             net.train() #put the net in train mode
+#             # TODO 
+#             print('208')
+#             losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y, opt=optimizer) for X, Y in train_dl])
+#             print('210')
+#             train_epoch_loss += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
+#             print('212')
 
-def fit_and_validate(net, optimizer, train, val, n_epochs, loss_func = nn.CrossEntropyLoss(), batch_size=1):
+#             with torch.no_grad():
+#                 net.eval() #put the net in evaluation mode
+#                 # TODO compute the train and validation losses and store it in a list
+#                 losses, nums = zip(*[loss_batch(net, loss_func, X, Y) for X, Y in val_dl])
+#                 val_epoch_loss += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
+
+#         print('here')
+#         return train_epoch_loss, val_epoch_loss
+#     except Exception as err:
+#         traceback.print_tb(err.__traceback__)
+
+def fit_and_validate(net, optimizer, loss_func, train, val, n_epochs, batch_size=1, sch=None):
     """
     @param net: the neural network
     @param optimizer: a optim.Optimizer used for some variant of stochastic gradient descent
@@ -192,39 +237,42 @@ def fit_and_validate(net, optimizer, train, val, n_epochs, loss_func = nn.CrossE
     @param batch_size: the number of samples to use in each batch of gradient descent
     @return train_epoch_loss, validation_epoch_loss: two arrays of length n_epochs+1, containing the mean loss at the beginning of training and after each epoch
     """
-
-
+    print(type(loss_func))
     net.eval() #put the net in evaluation mode
     train_dl = torch.utils.data.DataLoader(train, batch_size)
     val_dl = torch.utils.data.DataLoader(val)
-    with torch.no_grad():
+    with torch.no_grad():   
         # compute the mean loss on the training set at the beginning of iteration
-        losses, nums = zip(*[loss_batch(net, loss_func, X, Y) for X, Y in train_dl])
-        train_epoch_loss = [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
-        val_epoch_loss = []
+        losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y) for X, Y in train_dl])
+        train_el = [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
         # TODO compute the validation loss and store it in a list
+        losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y) for X, Y in val_dl])
+        val_el = [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
 
 
     for _ in range(n_epochs):
+        print(val_el)
         net.train() #put the net in train mode
-        # TODO 
-        optimizer.zero_grad()
+        # TODO
+        
 
-        losses, nums = zip(*[loss_batch(net, loss_func, X, Y) for X, Y in train_dl])
-        train_epoch_loss += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
+        if sch is not None:
+            sch.step()
+            for param_group in optimizer.param_groups:
+                print("Current learning rate is: {}".format(param_group['lr']))
 
-        for loss in losses:
-            loss.backward()
-            optimizer.step()
-
+        losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y, opt=optimizer) for X, Y in train_dl])
+        train_el += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
 
         with torch.no_grad():
             net.eval() #put the net in evaluation mode
             # TODO compute the train and validation losses and store it in a list
-            losses, nums = zip(*[loss_batch(net, loss_func, X, Y) for X, Y in val_dl])
-            val_epoch_loss += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
+            losses, nums = zip(*[utils.loss_batch(net, loss_func, X, Y) for X, Y in val_dl])
+            val_el += [np.sum(np.multiply(losses, nums)) / np.sum(nums)]
 
-    return train_epoch_loss, val_epoch_loss
+    return train_el, val_el 
+
+    
 
 
 def reconstruct_SVD(img, k, best=True):
@@ -253,6 +301,8 @@ def reconstruct_SVD(img, k, best=True):
         new_img[:,:,2] += sigma_B[i] * np.outer(u_B[:, i], vt_B[i])
     
     return new_img
+
+    
 
 
 
